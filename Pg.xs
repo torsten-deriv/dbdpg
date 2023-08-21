@@ -223,6 +223,27 @@ constant(name=Nullch)
     PG_OLDQUERY_CANCEL                = 2
     PG_OLDQUERY_WAIT                  = 4
 
+    PG_CONNECTION_OK                  = CONNECTION_OK
+    PG_CONNECTION_BAD                 = CONNECTION_BAD
+    PG_CONNECTION_STARTED             = CONNECTION_STARTED
+    PG_CONNECTION_MADE                = CONNECTION_MADE
+    PG_CONNECTION_AWAITING_RESPONSE   = CONNECTION_AWAITING_RESPONSE
+    PG_CONNECTION_AUTH_OK             = CONNECTION_AUTH_OK
+    PG_CONNECTION_SETENV              = CONNECTION_SETENV
+    PG_CONNECTION_SSL_STARTUP         = CONNECTION_SSL_STARTUP
+    PG_CONNECTION_NEEDED              = CONNECTION_NEEDED
+    PG_CONNECTION_CHECK_WRITABLE      = CONNECTION_CHECK_WRITABLE
+    PG_CONNECTION_CONSUME             = CONNECTION_CONSUME
+    PG_CONNECTION_GSS_STARTUP         = CONNECTION_GSS_STARTUP
+    PG_CONNECTION_CHECK_TARGET        = CONNECTION_CHECK_TARGET
+    PG_CONNECTION_CHECK_STANDBY       = CONNECTION_CHECK_STANDBY
+
+    PG_PGRES_POLLING_FAILED           = PGRES_POLLING_FAILED
+    PG_PGRES_POLLING_READING          = PGRES_POLLING_READING
+    PG_PGRES_POLLING_WRITING          = PGRES_POLLING_WRITING
+    PG_PGRES_POLLING_OK               = PGRES_POLLING_OK
+    PG_PGRES_POLLING_ACTIVE           = PGRES_POLLING_ACTIVE
+
     CODE:
         if (0==ix) {
             if (!name) {
@@ -236,8 +257,34 @@ constant(name=Nullch)
     OUTPUT:
         RETVAL
 
-INCLUDE: Pg.xsi
+TYPEMAP: <<HERE
+PGconn* T_PTROBJ
+ConnStatusType T_ENUM
+PostgresPollingStatusType T_ENUM
+HERE
 
+PGconn*
+PQconnectdb(conninfo)
+    char * conninfo
+
+PGconn*
+PQconnectStart(conninfo)
+    char * conninfo
+
+PostgresPollingStatusType
+PQconnectPoll(conn)
+    PGconn * conn
+
+ConnStatusType
+PQstatus(conn)
+    PGconn * conn
+
+void
+PQfinish(conn)
+    PGconn * conn
+
+
+INCLUDE: Pg.xsi
 
 # ------------------------------------------------------------
 # db functions
