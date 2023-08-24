@@ -238,51 +238,27 @@ constant(name=Nullch)
     PG_CONNECTION_CHECK_TARGET        = CONNECTION_CHECK_TARGET
     PG_CONNECTION_CHECK_STANDBY       = CONNECTION_CHECK_STANDBY
 
-    PG_PGRES_POLLING_FAILED           = PGRES_POLLING_FAILED
-    PG_PGRES_POLLING_READING          = PGRES_POLLING_READING
-    PG_PGRES_POLLING_WRITING          = PGRES_POLLING_WRITING
-    PG_PGRES_POLLING_OK               = PGRES_POLLING_OK
-    PG_PGRES_POLLING_ACTIVE           = PGRES_POLLING_ACTIVE
+    PG_POLLING_FAILED                 = PGRES_POLLING_FAILED
+    PG_POLLING_READING                = PGRES_POLLING_READING
+    PG_POLLING_WRITING                = PGRES_POLLING_WRITING
+    PG_POLLING_OK                     = PGRES_POLLING_OK
+    PG_POLLING_ACTIVE                 = PGRES_POLLING_ACTIVE
 
     CODE:
         if (0==ix) {
             if (!name) {
                 name = GvNAME(CvGV(cv));
             }
-            croak("Unknown DBD::Pg constant '%s'", name);
+            if (!strcmp(name, "constant"))
+                croak("Unknown DBD::Pg constant '%s'", name);
         }
-        else {
-            RETVAL = ix;
-        }
+        RETVAL = ix;
     OUTPUT:
         RETVAL
 
 TYPEMAP: <<HERE
-PGconn* T_PTROBJ
-ConnStatusType T_ENUM
 PostgresPollingStatusType T_ENUM
 HERE
-
-PGconn*
-PQconnectdb(conninfo)
-    char * conninfo
-
-PGconn*
-PQconnectStart(conninfo)
-    char * conninfo
-
-PostgresPollingStatusType
-PQconnectPoll(conn)
-    PGconn * conn
-
-ConnStatusType
-PQstatus(conn)
-    PGconn * conn
-
-void
-PQfinish(conn)
-    PGconn * conn
-
 
 INCLUDE: Pg.xsi
 
@@ -387,6 +363,15 @@ quote(dbh, to_quote_sv, type_sv=Nullsv)
 # database level interface PG specific
 # ------------------------------------------------------------
 MODULE = DBD::Pg    PACKAGE = DBD::Pg::db
+
+
+PostgresPollingStatusType
+pg_connection_poll(dbh)
+    SV * dbh
+    CODE:
+        RETVAL = pg_db_pg_connection_poll(dbh);
+    OUTPUT:
+        RETVAL
 
 
 void state(dbh)

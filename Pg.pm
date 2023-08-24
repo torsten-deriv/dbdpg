@@ -41,7 +41,16 @@ use 5.008001;
 
     our %EXPORT_TAGS =
         (
-         async => [qw($DBDPG_DEFAULT PG_ASYNC PG_OLDQUERY_CANCEL PG_OLDQUERY_WAIT)],
+         async => [qw($DBDPG_DEFAULT PG_ASYNC PG_OLDQUERY_CANCEL PG_OLDQUERY_WAIT
+                      PG_POLLING_OK PG_POLLING_FAILED
+                      PG_POLLING_READING PG_POLLING_WRITING PG_POLLING_ACTIVE
+                      PG_CONNECTION_OK PG_CONNECTION_BAD PG_CONNECTION_STARTED
+                      PG_CONNECTION_MADE PG_CONNECTION_AWAITING_RESPONSE
+                      PG_CONNECTION_AUTH_OK PG_CONNECTION_SETENV
+                      PG_CONNECTION_SSL_STARTUP PG_CONNECTION_NEEDED
+                      PG_CONNECTION_CHECK_WRITABLE PG_CONNECTION_CONSUME
+                      PG_CONNECTION_GSS_STARTUP PG_CONNECTION_CHECK_TARGET
+                      PG_CONNECTION_CHECK_STANDBY)],
          pg_limits => [qw($DBDPG_DEFAULT
                        PG_MIN_SMALLINT PG_MAX_SMALLINT PG_MIN_INTEGER PG_MAX_INTEGER PG_MAX_BIGINT PG_MIN_BIGINT
                        PG_MIN_SMALLSERIAL PG_MAX_SMALLSERIAL PG_MIN_SERIAL PG_MAX_SERIAL PG_MIN_BIGSERIAL PG_MAX_BIGSERIAL)],
@@ -169,6 +178,7 @@ use 5.008001;
             DBD::Pg::db->install_method('pg_server_trace');
             DBD::Pg::db->install_method('pg_server_untrace');
             DBD::Pg::db->install_method('pg_type_info');
+            DBD::Pg::db->install_method('pg_connection_poll');
 
             DBD::Pg::st->install_method('pg_cancel');
             DBD::Pg::st->install_method('pg_result');

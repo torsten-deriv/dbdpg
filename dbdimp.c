@@ -90,6 +90,104 @@ void dbd_init (dbistate_t *dbistate)
     DBISTATE_INIT;
 }
 
+static int _when_connection_ok (pTHX_ SV * dbh, imp_dbh_t * imp_dbh)
+{
+    /* Figure out what protocol this server is using (most likely 3) */
+    TRACE_PQPROTOCOLVERSION;
+    imp_dbh->pg_protocol = PQprotocolVersion(imp_dbh->conn);
+
+    /* Figure out this particular backend's version */
+    TRACE_PQSERVERVERSION;
+    imp_dbh->pg_server_version = PQserverVersion(imp_dbh->conn);
+
+    if (imp_dbh->pg_server_version < 80000) {
+        /* 
+           Special workaround for PgBouncer, which has the unfortunate habit of modifying 'server_version', 
+           something it should never do. If we think this is the case for the version failure, we 
+           simply allow things to continue with a faked version. See github issue #47
+        */
+        if (NULL != strstr(PQparameterStatus(imp_dbh->conn, "server_version"), "bouncer")) {
+           imp_dbh->pg_server_version = 90600;
+        }
+        else {
+            TRACE_PQERRORMESSAGE;
+            strncpy(imp_dbh->sqlstate, "08001", 6); /* sqlclient_unable_to_establish_sqlconnection */
+            pg_error(aTHX_ dbh, CONNECTION_BAD, "Server version 8.0 required");
+            TRACE_PQFINISH;
+            PQfinish(imp_dbh->conn);
+            sv_free((SV *)imp_dbh->savepoints);
+            return 0;
+        }
+    }
+
+    return 1;
+}
+
+/* ================================================================== */
+PostgresPollingStatusType pg_db_pg_connection_poll (SV * dbh)
+{
+    dTHX;
+    D_imp_dbh(dbh);
+    PostgresPollingStatusType pollstatus;
+    ConnStatusType connstatus;
+
+    if (TSTART_slow) TRC(DBILOGFP, "%sBegin pg_db_pg_connection_poll\n", THEADER_slow);
+
+    pollstatus = PQconnectPoll(imp_dbh->conn);
+    connstatus = PQstatus(imp_dbh->conn);
+    switch (connstatus) {
+    case CONNECTION_OK:
+        if (imp_dbh->pg_protocol == -1) {
+            if (!_when_connection_ok(aTHX_ dbh, imp_dbh)) {
+                if (TEND_slow) TRC(DBILOGFP, "%sEnd pg_db_pg_connection_poll (error)\n", THEADER_slow);
+                return PGRES_POLLING_FAILED;
+            }
+        }
+        break;
+    case CONNECTION_BAD:
+        TRACE_PQERRORMESSAGE;
+        strncpy(imp_dbh->sqlstate, "08006", 6); /* "CONNECTION FAILURE" */
+        pg_error(aTHX_ dbh, connstatus, PQerrorMessage(imp_dbh->conn));
+        if (TEND_slow) TRC(DBILOGFP, "%sEnd pg_db_pg_connection_poll (error)\n", THEADER_slow);
+        return PGRES_POLLING_FAILED;
+    case CONNECTION_STARTED:
+        pg_error(aTHX_ dbh, connstatus, "Waiting for connection to be made\n");
+        break;
+    case CONNECTION_MADE:
+        pg_error(aTHX_ dbh, connstatus, "Connection OK; waiting to send\n");
+        break;
+    case CONNECTION_AWAITING_RESPONSE:
+        pg_error(aTHX_ dbh, connstatus, "Waiting for a response from the postmaster\n");
+        break;
+    case CONNECTION_AUTH_OK:
+        pg_error(aTHX_ dbh, connstatus, "Received authentication; waiting for backend startup\n");
+        break;
+    case CONNECTION_SSL_STARTUP:
+        pg_error(aTHX_ dbh, connstatus, "Negotiating SSL\n");
+        break;
+    case CONNECTION_CHECK_WRITABLE:
+        pg_error(aTHX_ dbh, connstatus, "Checking if session is read-write\n");
+        break;
+    case CONNECTION_CONSUME:
+        pg_error(aTHX_ dbh, connstatus, "Consuming any extra messages\n");
+        break;
+    case CONNECTION_GSS_STARTUP:
+        pg_error(aTHX_ dbh, connstatus, "Negotiating GSSAPI\n");
+        break;
+    case CONNECTION_CHECK_TARGET:
+        pg_error(aTHX_ dbh, connstatus, "Checking target server properties\n");
+        break;
+    case CONNECTION_CHECK_STANDBY:
+	pg_error(aTHX_ dbh, connstatus, "Checking if server is in standby mode\n");
+        break;
+    default:
+	pg_error(aTHX_ dbh, connstatus, "Operation in progress; check $DBI::err\n");
+        break;
+    }
+
+    if (TEND_slow) TRC(DBILOGFP, "%sEnd pg_db_pg_connection_poll\n", THEADER_slow);
+    return pollstatus;
+} /* end of pg_db_pg_connection_poll */
 
 /* ================================================================== */
 int dbd_db_login6 (SV * dbh, imp_dbh_t * imp_dbh, char * dbname, char * uid, char * pwd, SV *attr)
@@ -102,8 +200,17 @@ int dbd_db_login6 (SV * dbh, imp_dbh_t * imp_dbh, char * dbname, char * uid, cha
     bool           inquote = DBDPG_FALSE;
     STRLEN         connect_string_size;
     ConnStatusType connstatus;
+    bool           async_connect = DBDPG_FALSE;
 
     if (TSTART_slow) TRC(DBILOGFP, "%sBegin dbd_db_login\n", THEADER_slow);
+
+    if (SvROK(attr)) {
+        SV* sv = SvRV(attr);
+        if (SvTYPE(sv) == SVt_PVHV) {
+            SV** val = hv_fetchs(MUTABLE_HV(sv), "pg_async_connect", 0);
+            if (val && SvTRUE(*val)) async_connect = DBDPG_TRUE;
+        }
+    }
 
     /* DBD::Pg syntax: 'dbname=dbname;host=host;port=port', 'User', 'Pass' */
     /* libpq syntax: 'dbname=dbname host=host port=port user=uid password=pwd' */
@@ -176,7 +283,11 @@ int dbd_db_login6 (SV * dbh, imp_dbh_t * imp_dbh, char * dbname, char * uid, cha
     /* Attempt the connection to the database */
     if (TLOGIN_slow) TRC(DBILOGFP, "%sLogin connection string: (%s)\n", THEADER_slow, conn_str);
     TRACE_PQCONNECTDB;
-    imp_dbh->conn = PQconnectdb(conn_str);
+    if (async_connect) {
+        imp_dbh->conn = PQconnectStart(conn_str);
+    } else {
+        imp_dbh->conn = PQconnectdb(conn_str);
+    }
     if (TLOGIN_slow) TRC(DBILOGFP, "%sConnection complete\n", THEADER_slow);
     Safefree(conn_str);
 
@@ -187,7 +298,11 @@ int dbd_db_login6 (SV * dbh, imp_dbh_t * imp_dbh, char * dbname, char * uid, cha
     /* Check to see that the backend connection was successfully made */
     TRACE_PQSTATUS;
     connstatus = PQstatus(imp_dbh->conn);
-    if (CONNECTION_OK != connstatus) {
+
+    /* Outside of an async connection procedure, connstatus can only be CONNECTION_OK
+       or CONNECTION_BAD. So, if it's not BAD, it's either OK or async connect.
+    */
+    if (CONNECTION_BAD == connstatus) {
         TRACE_PQERRORMESSAGE;
         strncpy(imp_dbh->sqlstate, "08006", 6); /* "CONNECTION FAILURE" */
         pg_error(aTHX_ dbh, connstatus, PQerrorMessage(imp_dbh->conn));
@@ -202,33 +317,16 @@ int dbd_db_login6 (SV * dbh, imp_dbh_t * imp_dbh, char * dbname, char * uid, cha
     TRACE_PQSETNOTICEPROCESSOR;
     (void)PQsetNoticeProcessor(imp_dbh->conn, pg_warn, (void *)SvRV(dbh));
     
-    /* Figure out what protocol this server is using (most likely 3) */
-    TRACE_PQPROTOCOLVERSION;
-    imp_dbh->pg_protocol = PQprotocolVersion(imp_dbh->conn);
-
-    /* Figure out this particular backend's version */
-    TRACE_PQSERVERVERSION;
-    imp_dbh->pg_server_version = PQserverVersion(imp_dbh->conn);
-
-    if (imp_dbh->pg_server_version < 80000) {
-        /* 
-           Special workaround for PgBouncer, which has the unfortunate habit of modifying 'server_version', 
-           something it should never do. If we think this is the case for the version failure, we 
-           simply allow things to continue with a faked version. See github issue #47
-        */
-        if (NULL != strstr(PQparameterStatus(imp_dbh->conn, "server_version"), "bouncer")) {
-           imp_dbh->pg_server_version = 90600;
-        }
-        else {
-            TRACE_PQERRORMESSAGE;
-            strncpy(imp_dbh->sqlstate, "08001", 6); /* sqlclient_unable_to_establish_sqlconnection */
-            pg_error(aTHX_ dbh, CONNECTION_BAD, "Server version 8.0 required");
-            TRACE_PQFINISH;
-            PQfinish(imp_dbh->conn);
-            sv_free((SV *)imp_dbh->savepoints);
+    if (CONNECTION_OK == connstatus) {
+        if (!_when_connection_ok(aTHX_ dbh, imp_dbh)) {
             if (TEND_slow) TRC(DBILOGFP, "%sEnd dbd_db_login (error)\n", THEADER_slow);
             return 0;
         }
+    } else {
+        /* async connect */
+        imp_dbh->pg_protocol = -1;
+        imp_dbh->pg_server_version = 0;
+        pg_error(aTHX_ dbh, connstatus, "Operation now in progress\n");
     }
 
     pg_db_detect_client_encoding_utf8(aTHX_ imp_dbh);
@@ -258,11 +356,11 @@ int dbd_db_login6 (SV * dbh, imp_dbh_t * imp_dbh, char * dbname, char * uid, cha
     imp_dbh->result_clearable  = DBDPG_TRUE;
     imp_dbh->pg_int8_as_string = DBDPG_FALSE;
 
-    /* Tell DBI that we should call destroy when the handle dies */
-    DBIc_IMPSET_on(imp_dbh);
-
     /* Tell DBI that we should call disconnect when the handle dies */
     DBIc_ACTIVE_on(imp_dbh);
+
+    /* Tell DBI that we should call destroy when the handle dies */
+    DBIc_IMPSET_on(imp_dbh);
 
     if (TEND_slow) TRC(DBILOGFP, "%sEnd dbd_db_login\n", THEADER_slow);
 
