@@ -17,6 +17,28 @@
 #define strncasecmp(a,b,c) _strnicmp((a),(b),(c))
 #endif
 
+#if PGLIBVERSION < 80000
+#define CONNECTION_SSL_STARTUP -1
+#define CONNECTION_NEEDED -1
+#endif
+
+#if PGLIBVERSION < 100000
+#define CONNECTION_CHECK_WRITABLE -1
+#define CONNECTION_CONSUME -1
+#endif
+
+#if PGLIBVERSION < 120000
+#define CONNECTION_GSS_STARTUP -1
+#endif
+
+#if PGLIBVERSION < 130000
+#define CONNECTION_CHECK_TARGET -1
+#endif
+
+#if PGLIBVERSION < 140000
+#define CONNECTION_CHECK_STANDBY -1
+#endif
+
 MODULE = DBD::Pg    PACKAGE = DBD::Pg
 
 
