@@ -178,10 +178,10 @@ PostgresPollingStatusType pg_db_pg_connection_poll (SV * dbh)
         pg_error(aTHX_ dbh, connstatus, "Checking target server properties\n");
         break;
     case CONNECTION_CHECK_STANDBY:
-	pg_error(aTHX_ dbh, connstatus, "Checking if server is in standby mode\n");
+        pg_error(aTHX_ dbh, connstatus, "Checking if server is in standby mode\n");
         break;
     default:
-	pg_error(aTHX_ dbh, connstatus, "Operation in progress; check $DBI::err\n");
+        pg_error(aTHX_ dbh, connstatus, "Operation in progress; check $DBI::err\n");
         break;
     }
 

@@ -4164,16 +4164,16 @@ can set these values when the connection is fully established.
 It is also possible to investigate the connection state in more detail by
 examining C<$DBI::err> or C<$DBI::errstr> or the corresponding methods.
 
-The libpq documentation lists these prerequisits for asynchronous connection
+The libpq documentation lists these prerequisites for asynchronous connection
 establishment:
 
 =over 4
 
 =item * the host address is provided in a form that does not require name resolution
 
-=item * the PQtrace stream object does not block
+=item * the C<PQtrace> stream object does not block
 
-PQtrace is available as C<pg_server_trace> method in Perl. So, make sure that file
+C<PQtrace> is available as C<pg_server_trace> method in Perl. So, make sure that file
 handle does not block on write operations.
 
 =item * the connection algorithm outlined above is followed
@@ -4214,7 +4214,8 @@ waiting for the socket to become readable or writable.
 
 These are possible values of libpq's C<PQstatus> function during asynchronous
 connection setup. While the connection is being set up these are mapped to
-C<$DBI:err> and the C<< $dbh->err >> method.
+C<$DBI::err> and
+the C<< $dbh->err >> method.
 
 Not all of these values might be available in your version of libpq. If
 libpq does not provide this value, C<-1> will be returned.
@@ -4248,14 +4249,14 @@ The connection could not be established. This is a final state.
 
 =item B<PG_POLLING_READING>
 
-Wait until C<< $dbh->{pg_socket} >> becomes readable. Then call C<pg_connection_poll>
+Wait until C<$dbh-E<gt>{pg_socket}> becomes readable. Then call C<pg_connection_poll>
 again.
 
 Note, C<pg_connection_poll> may change C<pg_socket>.
 
 =item B<PG_POLLING_WRITING>
 
-Wait until C<< $dbh->{pg_socket} >> becomes writable. Then call C<pg_connection_poll>
+Wait until C<$dbh-E<gt>{pg_socket}> becomes writable. Then call C<pg_connection_poll>
 again.
 
 Note, C<pg_connection_poll> may change C<pg_socket>.
