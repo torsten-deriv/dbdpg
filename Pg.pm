@@ -41,7 +41,16 @@ use 5.008001;
 
     our %EXPORT_TAGS =
         (
-         async => [qw($DBDPG_DEFAULT PG_ASYNC PG_OLDQUERY_CANCEL PG_OLDQUERY_WAIT)],
+         async => [qw($DBDPG_DEFAULT PG_ASYNC PG_OLDQUERY_CANCEL PG_OLDQUERY_WAIT
+                      PG_POLLING_OK PG_POLLING_FAILED
+                      PG_POLLING_READING PG_POLLING_WRITING PG_POLLING_ACTIVE
+                      PG_CONNECTION_OK PG_CONNECTION_BAD PG_CONNECTION_STARTED
+                      PG_CONNECTION_MADE PG_CONNECTION_AWAITING_RESPONSE
+                      PG_CONNECTION_AUTH_OK PG_CONNECTION_SETENV
+                      PG_CONNECTION_SSL_STARTUP PG_CONNECTION_NEEDED
+                      PG_CONNECTION_CHECK_WRITABLE PG_CONNECTION_CONSUME
+                      PG_CONNECTION_GSS_STARTUP PG_CONNECTION_CHECK_TARGET
+                      PG_CONNECTION_CHECK_STANDBY)],
          pg_limits => [qw($DBDPG_DEFAULT
                        PG_MIN_SMALLINT PG_MAX_SMALLINT PG_MIN_INTEGER PG_MAX_INTEGER PG_MAX_BIGINT PG_MIN_BIGINT
                        PG_MIN_SMALLSERIAL PG_MAX_SMALLSERIAL PG_MIN_SERIAL PG_MAX_SERIAL PG_MIN_BIGSERIAL PG_MAX_BIGSERIAL)],
@@ -169,6 +178,7 @@ use 5.008001;
             DBD::Pg::db->install_method('pg_server_trace');
             DBD::Pg::db->install_method('pg_server_untrace');
             DBD::Pg::db->install_method('pg_type_info');
+            DBD::Pg::db->install_method('pg_connection_poll');
 
             DBD::Pg::st->install_method('pg_cancel');
             DBD::Pg::st->install_method('pg_result');
@@ -4093,6 +4103,167 @@ exists, it will only destroy the most recently created one. Note that all savepo
 created after the one being released are also destroyed.
 
   $dbh->pg_release("mysavepoint");
+
+=head2 Asynchronous Connect
+
+Connecting to a database involves some network interaction. Normally, C<< DBI->connect() >>
+only returns when the connection is fully established. However, DBD::Pg allows you to avoid
+blocking while waiting for responses from the DB server.
+
+In order to initiate asynchronous connection establishment, pass C<pg_async_connect> as a
+true value in the attributes hash of C<< DBI->connect() >>.
+
+  my $dbh = DBI->connect('dbi:Pg:...', $user, $password, {pg_async_connect => 1});
+
+The resulting handle will not be able to serve queries immediately. The following code
+shows how to get a functional handle:
+
+  use DBD::Pg qw/:async/;
+
+  my $dbh = DBI->connect('dbi:Pg:'.$pgurl, undef, undef, {
+    RaiseError=>0,           # see explanation below
+    PrintError=>0,           # ...
+    pg_async_connect=>1,
+  });
+
+  # the handle is in POLLING_WRITING state after ->connect()
+  my $state = PG_POLLING_WRITING;
+  while (PG_POLLING_OK != $state and PG_POLLING_FAILED != $state) {
+    # be sure to fetch the socket each time after calling
+    # ->pg_connection_poll. This function may change the it.
+    my $fd = $dbh->{pg_socket};
+
+    my $sel = IO::Select->new($fd);
+    if (PG_POLLING_WRITING == $state) {
+      # wait for the socket to become writable
+      $sel->can_write;
+    } elsif (PG_POLLING_READING == $state) {
+      # wait for the socket to become readable
+      $sel->can_read;
+    } else {
+      die "Unexpected polling state: $state (dbstate: $DBI::err, msg: $DBI::errstr)\n";
+    }
+    # transition to the next state
+    $state = $dbh->pg_connection_poll;
+  }
+  if (POLLING_OK == $state) {
+    $dbh->{RaiseError} = 1;    # if desired
+    $dbh->{PrintError} = 1;    # ...
+
+    # now you can run queries
+  } else {
+    # evaluate ->err, ->errstr, $DBI::err or $DBI::errstr in order
+    # to learn what went wrong.
+  }
+
+While initiating the connection, the handle is in error state from Perl's
+perspective. So, if C<RaiseError> is set, C<pg_connection_poll> will die.
+Similarly, if C<PrintError> is set, each time a message is printed. You
+can set these values when the connection is fully established.
+
+It is also possible to investigate the connection state in more detail by
+examining C<$DBI::err> or C<$DBI::errstr> or the corresponding methods.
+
+The libpq documentation lists these prerequisites for asynchronous connection
+establishment:
+
+=over 4
+
+=item * the host address is provided in a form that does not require name resolution
+
+=item * the C<PQtrace> stream object does not block
+
+C<PQtrace> is available as C<pg_server_trace> method in Perl. So, make sure that file
+handle does not block on write operations.
+
+=item * the connection algorithm outlined above is followed
+
+=back
+
+=head3 Asynchronous Connection Constants
+
+=over 4
+
+=item B<PG_POLLING_OK>
+=item B<PG_POLLING_FAILED>
+=item B<PG_POLLING_READING>
+=item B<PG_POLLING_WRITING>
+
+see below L</pg_connection_poll>
+
+=item B<PG_POLLING_ACTIVE>
+
+With a libpq version of 7.x or older, this is also a possible return value of
+L</pg_connection_poll>. It indicates to call C<pg_connection_poll> again without
+waiting for the socket to become readable or writable.
+
+=item B<PG_CONNECTION_OK>
+=item B<PG_CONNECTION_BAD>
+=item B<PG_CONNECTION_STARTED>
+=item B<PG_CONNECTION_MADE>
+=item B<PG_CONNECTION_AWAITING_RESPONSE>
+=item B<PG_CONNECTION_AUTH_OK>
+=item B<PG_CONNECTION_SETENV>
+=item B<PG_CONNECTION_SSL_STARTUP>
+=item B<PG_CONNECTION_NEEDED>
+=item B<PG_CONNECTION_CHECK_WRITABLE>
+=item B<PG_CONNECTION_CONSUME>
+=item B<PG_CONNECTION_GSS_STARTUP>
+=item B<PG_CONNECTION_CHECK_TARGET>
+=item B<PG_CONNECTION_CHECK_STANDBY>
+
+These are possible values of libpq's C<PQstatus> function during asynchronous
+connection setup. While the connection is being set up these are mapped to
+C<$DBI::err> and
+the C<< $dbh->err >> method.
+
+Not all of these values might be available in your version of libpq. If
+libpq does not provide this value, C<-1> will be returned.
+
+This list might be extended with future versions of Postgres. As of version
+15, this list is complete.
+
+=back
+
+=head3 Asynchronous Connection Methods
+
+=over 4
+
+=item B<pg_connection_poll>
+
+This function is called to transition to the next state while establishing a connection.
+If C<RaiseError> is active, this function almost always dies. So, turn it off while
+connection establishment is in progress.
+
+It returns one of the following
+
+=over 4
+
+=item B<PG_POLLING_OK>
+
+The connection has been established successfully and is now ready to perform queries.
+
+=item B<PG_POLLING_FAILED>
+
+The connection could not be established. This is a final state.
+
+=item B<PG_POLLING_READING>
+
+Wait until C<$dbh-E<gt>{pg_socket}> becomes readable. Then call C<pg_connection_poll>
+again.
+
+Note, C<pg_connection_poll> may change C<pg_socket>.
+
+=item B<PG_POLLING_WRITING>
+
+Wait until C<$dbh-E<gt>{pg_socket}> becomes writable. Then call C<pg_connection_poll>
+again.
+
+Note, C<pg_connection_poll> may change C<pg_socket>.
+
+=back
+
+=back
 
 =head2 Asynchronous Queries
 

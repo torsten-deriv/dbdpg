@@ -216,6 +216,8 @@ SV* dbd_st_canonical_names(SV *sth, imp_sth_t *imp_sth);
 
 /* Custom PG functions, in order they appear in dbdimp.c */
 
+PostgresPollingStatusType pg_db_pg_connection_poll (SV * dbh);
+
 int pg_db_getfd (imp_dbh_t * imp_dbh);
 
 SV * pg_db_pg_notifies (SV *dbh, imp_dbh_t *imp_dbh);

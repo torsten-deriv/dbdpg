@@ -17,6 +17,28 @@
 #define strncasecmp(a,b,c) _strnicmp((a),(b),(c))
 #endif
 
+#if PGLIBVERSION < 80000
+#define CONNECTION_SSL_STARTUP -1
+#define CONNECTION_NEEDED -1
+#endif
+
+#if PGLIBVERSION < 100000
+#define CONNECTION_CHECK_WRITABLE -1
+#define CONNECTION_CONSUME -1
+#endif
+
+#if PGLIBVERSION < 120000
+#define CONNECTION_GSS_STARTUP -1
+#endif
+
+#if PGLIBVERSION < 130000
+#define CONNECTION_CHECK_TARGET -1
+#endif
+
+#if PGLIBVERSION < 140000
+#define CONNECTION_CHECK_STANDBY -1
+#endif
+
 MODULE = DBD::Pg    PACKAGE = DBD::Pg
 
 
@@ -223,21 +245,44 @@ constant(name=Nullch)
     PG_OLDQUERY_CANCEL                = 2
     PG_OLDQUERY_WAIT                  = 4
 
+    PG_CONNECTION_OK                  = CONNECTION_OK
+    PG_CONNECTION_BAD                 = CONNECTION_BAD
+    PG_CONNECTION_STARTED             = CONNECTION_STARTED
+    PG_CONNECTION_MADE                = CONNECTION_MADE
+    PG_CONNECTION_AWAITING_RESPONSE   = CONNECTION_AWAITING_RESPONSE
+    PG_CONNECTION_AUTH_OK             = CONNECTION_AUTH_OK
+    PG_CONNECTION_SETENV              = CONNECTION_SETENV
+    PG_CONNECTION_SSL_STARTUP         = CONNECTION_SSL_STARTUP
+    PG_CONNECTION_NEEDED              = CONNECTION_NEEDED
+    PG_CONNECTION_CHECK_WRITABLE      = CONNECTION_CHECK_WRITABLE
+    PG_CONNECTION_CONSUME             = CONNECTION_CONSUME
+    PG_CONNECTION_GSS_STARTUP         = CONNECTION_GSS_STARTUP
+    PG_CONNECTION_CHECK_TARGET        = CONNECTION_CHECK_TARGET
+    PG_CONNECTION_CHECK_STANDBY       = CONNECTION_CHECK_STANDBY
+
+    PG_POLLING_FAILED                 = PGRES_POLLING_FAILED
+    PG_POLLING_READING                = PGRES_POLLING_READING
+    PG_POLLING_WRITING                = PGRES_POLLING_WRITING
+    PG_POLLING_OK                     = PGRES_POLLING_OK
+    PG_POLLING_ACTIVE                 = PGRES_POLLING_ACTIVE
+
     CODE:
         if (0==ix) {
             if (!name) {
                 name = GvNAME(CvGV(cv));
             }
-            croak("Unknown DBD::Pg constant '%s'", name);
+            if (!strcmp(name, "constant"))
+                croak("Unknown DBD::Pg constant '%s'", name);
         }
-        else {
-            RETVAL = ix;
-        }
+        RETVAL = ix;
     OUTPUT:
         RETVAL
 
-INCLUDE: Pg.xsi
+TYPEMAP: <<HERE
+PostgresPollingStatusType T_ENUM
+HERE
 
+INCLUDE: Pg.xsi
 
 # ------------------------------------------------------------
 # db functions
@@ -340,6 +385,15 @@ quote(dbh, to_quote_sv, type_sv=Nullsv)
 # database level interface PG specific
 # ------------------------------------------------------------
 MODULE = DBD::Pg    PACKAGE = DBD::Pg::db
+
+
+PostgresPollingStatusType
+pg_connection_poll(dbh)
+    SV * dbh
+    CODE:
+        RETVAL = pg_db_pg_connection_poll(dbh);
+    OUTPUT:
+        RETVAL
 
 
 void state(dbh)
